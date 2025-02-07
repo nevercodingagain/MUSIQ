@@ -19,7 +19,7 @@ config = Config({
 
     # data
     'db_name': 'KonIQ-10k',                                     # database type
-    'db_path': '/mnt/Dataset/anse_data/IQAdata/koniq-10k',      # root path of database
+    'db_path': './dataset/koniq-10k',                           # root path of database
     'txt_file_name': './IQA_list/koniq-10k.txt',                # list of images in the database
     'train_size': 0.8,                                          # train/vaildation separation ratio
     'scenes': 'all',                                            # using all scenes
@@ -56,7 +56,7 @@ config = Config({
 
     # load & save checkpoint
     'snap_path': './weights',               # directory for saving checkpoint
-    'checkpoint': None,                     # load checkpoint
+    'checkpoint': './weights/epoch10.pth',                     # load checkpoint
 })
 
 

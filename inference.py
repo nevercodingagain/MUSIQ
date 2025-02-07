@@ -15,7 +15,7 @@ from model.model_main import IQARegression
 # configuration
 config = Config({
     'gpu_id': 0,                                                        # specify gpu number to use
-    'dirname': '/mnt/Dataset/anse_data/IQAdata/koniq-10k/1024x768',     # directory of data root
+    'dirname': './dataset/koniq-10k/1024x768',                          # directory of data root
     'checkpoint': './weights/epoch40.pth',                              # weights of trained model
     'result_score_txt': 'test_score.txt',                               # file for saving inference results
     'batch_size': 1,                                                    # fix the value as 1 (for inference)
