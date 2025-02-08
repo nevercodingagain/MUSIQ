@@ -56,7 +56,7 @@ config = Config({
 
     # load & save checkpoint
     'snap_path': './weights',               # directory for saving checkpoint
-    'checkpoint': './weights/epoch10.pth',                     # load checkpoint
+    'checkpoint': './weights/epoch100.pth',                     # load checkpoint
 })
 
 
@@ -138,3 +138,18 @@ for epoch in range(start_epoch, config.n_epoch):
     if (epoch+1) % config.val_freq == 0:
         loss, rho_s, rho_p = eval_epoch(config, epoch, model_transformer, model_backbone, criterion, test_loader)
 
+def test_model(config):
+    # 加载模型
+    model_backbone = resnet50_backbone().to(config.device)
+    model_transformer = IQARegression(config).to(config.device)
+    
+    # 加载训练好的权重
+    checkpoint = torch.load(config.checkpoint)
+    model_backbone.load_state_dict(checkpoint['model_backbone_state_dict'])
+    model_transformer.load_state_dict(checkpoint['model_transformer_state_dict'])
+    
+    # 评估模型
+    loss, srcc, plcc = eval_epoch(config, 0, model_transformer, model_backbone, criterion, test_loader)
+    print(f"Final Test Results - Loss: {loss:.4f}, SRCC: {srcc:.4f}, PLCC: {plcc:.4f}")
+
+test_model(config)
