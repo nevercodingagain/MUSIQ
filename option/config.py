@@ -1,5 +1,6 @@
 import json
 import torch
+import os
 from utils.gpu_util import GPUGet
 
 
@@ -15,13 +16,13 @@ class Config(object):
         
         # 数据配置
         'db_name': 'KonIQ-10k',                         # 使用的数据库名称
-        'db_path': './dataset/koniq-10k',              # 数据库根路径
-        'txt_file_name': './IQA_list/koniq-10k.txt',   # 图像列表文件路径
+        'db_path': './dataset/koniq-10k',               # 数据库根路径
+        'txt_file_name': './IQA_list/koniq-10k.txt',    # 图像列表文件路径
         'train_size': 0.8,                              # 训练集划分比例
         'scenes': 'all',                                # 使用所有场景类型
         'scale_1': 384,                                 # 图像缩放尺寸1
         'scale_2': 224,                                 # 图像缩放尺寸2
-        'batch_size': 32,                               # 批处理大小
+        'batch_size': 8,                                # 批处理大小
         'patch_size': 32,                               # 图像块尺寸
         
         # ViT架构参数
@@ -49,26 +50,40 @@ class Config(object):
         'save_freq': 10,                                # 保存检查点频率（按轮数）
         'val_freq': 5,                                  # 验证频率（按轮数）
         
+        # 实验名称
+        'exp_name': None,                               # 实验唯一标识
+        
         # 路径配置
-        'snap_path': './weights',                      # 检查点保存目录
-        'checkpoint': './weights/epoch40.pth',          # 预训练检查点路径
+        'exp_name': None,
+        'snap_path': './experiments',                   # 检查点保存目录
+        'checkpoint_name': None,               # 检查点文件名称
+        'checkpoint': None,                             # 预训练检查点路径
         
         # 日志记录
-        'experiment_name': 'koniq_base',  # 实验唯一标识
-        'log_dir': './training_logs',     # 日志存储目录
-        'result_dir': './pred_results',   # 预测结果目录
-        'save_interval': 5,               # 预测结果保存间隔
+        'save_log': True,                               # 是否保存日志
         }
         
         # 根据输入更新自定义参数
         if custom_params:
             base_params.update(custom_params)
             
-        # 转换为类属性（保持点号访问方式）
+        # 将参数设置为实例属性
         for key, value in base_params.items():
             setattr(self, key, value)
         
-        # 自动获取可用gpu_ids
+        # 检查实验名称是否存在
+        if self.exp_name == None:
+            raise ValueError("实验名称必须设置！请通过'exp_name'指定实验名称")
+        
+        # 设置checkpoint路径
+        self.checkpoint = os.path.join(
+            self.snap_path,
+            self.exp_name,
+            'weights',
+            self.checkpoint_name,
+        ) if self.checkpoint_name else None
+        
+        # 自动获取可用gpu_id
         if self.gpu_id is None:  # 自动模式
             try:
                 gpu_get = GPUGet()
@@ -90,11 +105,10 @@ class Config(object):
         if self.device_ids:
             self.device = torch.device(f"cuda:{self.device_ids[0]}")
             torch.cuda.set_device(self.device)  # 设置默认设备
+            self.batch_size *= len(self.device_ids)
+            print(f"多gpu运行中，设置batch_size为{self.batch_size}")
         else:
             self.device = torch.device("cpu")
-            
-        # # 动态计算参数（需要动态计算或固定不可被更改的设计常数）
-        # self.device = torch.device(f"cuda:{self.gpu_id.split(',')[0]}" if torch.cuda.is_available() else "cpu")
     
     @classmethod
     def load(cls, file):

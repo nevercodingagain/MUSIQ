@@ -1,4 +1,4 @@
 *.pyc
 *.pth
-/weights
-/dataset/koniq-10k
+/experiments
+/dataset

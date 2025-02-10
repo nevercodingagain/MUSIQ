@@ -72,7 +72,7 @@ def train_epoch(config, epoch, model_transformer, model_backbone, criterion, opt
     # save weights
     if (epoch+1) % config.save_freq == 0:
         weights_file_name = "epoch%d.pth" % (epoch+1)
-        weights_file = os.path.join(config.snap_path, weights_file_name)
+        weights_file = os.path.join(config.snap_path, config.exp_name, 'weights', weights_file_name)
         torch.save({
             'epoch': epoch,
             # 兼容单卡/多卡
@@ -84,7 +84,13 @@ def train_epoch(config, epoch, model_transformer, model_backbone, criterion, opt
         }, weights_file)
         print('save weights of epoch %d' % (epoch+1))
 
-    return np.mean(losses), rho_s, rho_p
+    return {
+        'epoch': epoch+1,
+        'loss': np.mean(losses),
+        'srocc': rho_s,
+        'plcc': rho_p,
+        'lr': optimizer.param_groups[0]['lr']  # 记录学习率
+    }
 
 
 """ validation """
@@ -141,4 +147,10 @@ def eval_epoch(config, epoch, model_transformer, model_backbone, criterion, test
 
         print('test epoch:%d / loss:%f /SROCC:%4f / PLCC:%4f' % (epoch+1, loss.item(), rho_s, rho_p))
 
-        return np.mean(losses), rho_s, rho_p
+        return {
+            'epoch': epoch+1,
+            'loss': np.mean(losses),
+            'srocc': rho_s,
+            'plcc': rho_p,
+            'num_samples': len(test_loader.dataset)  # 记录测试样本数
+        }
