@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
+from option.config import *
 
 
 class IQARegression(nn.Module):
@@ -26,7 +27,11 @@ class IQARegression(nn.Module):
         )
     
     
-    def forward(self, mask_inputs, feat_dis_org, feat_dis_scale_1, feat_dis_scale_2):
+    def forward(self, feat_dis_org, feat_dis_scale_1, feat_dis_scale_2):
+        # 动态获取实际batch_size（考虑DataParallel分割后的子batch）
+        batch_size = feat_dis_org.size(0)
+        mask_inputs = torch.ones(batch_size, self.config.n_enc_seq+1, device=feat_dis_org.device)
+        
         # batch x (C=2048) x H x W -> batch x (C=384) x H x W
         feat_dis_org_embed = self.conv_enc(feat_dis_org)
         feat_dis_scale_1_embed = self.conv_enc(feat_dis_scale_1)
@@ -52,7 +57,6 @@ class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-
         self.encoder = Encoder(self.config)
     
     def forward(self, mask_inputs, feat_dis_org_embed, feat_dis_scale_1_embed, feat_dis_scale_2_embed):
@@ -92,10 +96,11 @@ class Encoder(nn.Module):
         # feat_dis_scale_2_embed: batch x (C=384) x (H=5) x (W=7)
           
         # learnable scale embedding
-        scale_org_embed = repeat(self.scale_org_embedding, '() c () () -> b c h w', b=self.config.batch_size, h=24, w=32)
-        scale_1_embed = repeat(self.scale_1_embedding, '() c () () -> b c h w', b=self.config.batch_size, h=9, w=12)
-        scale_2_embed = repeat(self.scale_1_embedding, '() c () () -> b c h w', b=self.config.batch_size, h=5, w=7)
+        scale_org_embed = repeat(self.scale_org_embedding, '() c () () -> b c h w', b=feat_dis_org_embed.size(0), h=24, w=32)
+        scale_1_embed = repeat(self.scale_1_embedding, '() c () () -> b c h w', b=feat_dis_org_embed.size(0), h=9, w=12)
+        scale_2_embed = repeat(self.scale_1_embedding, '() c () () -> b c h w', b=feat_dis_org_embed.size(0), h=5, w=7)
 
+        #print(103,feat_dis_org_embed.shape,scale_org_embed.shape) #torch.Size([2, 384, 24, 32]) torch.Size([8, 384, 24, 32])
         feat_dis_org_embed += scale_org_embed
         feat_dis_scale_1_embed += scale_1_embed
         feat_dis_scale_2_embed += scale_2_embed
@@ -103,35 +108,36 @@ class Encoder(nn.Module):
         # learnable 2D spatial embedding
         # original scale
         b, c, h, w = feat_dis_org_embed.size()
-        spatial_org_embed = torch.zeros(1, self.config.d_hidn, h, w).to(self.config.device)
+        spatial_org_embed = torch.zeros(1, self.config.d_hidn, h, w).to(device)
         for i in range(h):
             for j in range(w):
                 t_i = int((i/h)*self.config.Grid)
                 t_j = int((j/w)*self.config.Grid)
                 spatial_org_embed[:, :, i, j] = self.pos_embedding[:, t_i, t_j, :]
-        spatial_org_embed = repeat(spatial_org_embed, '() c h w -> b c h w', b=self.config.batch_size)
+        spatial_org_embed = repeat(spatial_org_embed, '() c h w -> b c h w', b=feat_dis_org_embed.size(0))
         # scale 1
         b, c, h, w = feat_dis_scale_1_embed.size()
-        spatial_scale_1_embed = torch.zeros(1, self.config.d_hidn, h, w).to(self.config.device)
+        spatial_scale_1_embed = torch.zeros(1, self.config.d_hidn, h, w).to(device)
         for i in range(h):
             for j in range(w):
                 t_i = int((i/h)*self.config.Grid)
                 t_j = int((j/w)*self.config.Grid)
                 spatial_scale_1_embed[:, :, i, j] = self.pos_embedding[:, t_i, t_j, :]
-        spatial_scale_1_embed = repeat(spatial_scale_1_embed, '() c h w -> b c h w', b=self.config.batch_size)
+        spatial_scale_1_embed = repeat(spatial_scale_1_embed, '() c h w -> b c h w', b=feat_dis_org_embed.size(0))
         # scale 2
         b, c, h, w = feat_dis_scale_2_embed.size()
-        spatial_scale_2_embed = torch.zeros(1, self.config.d_hidn, h , w).to(self.config.device)
+        spatial_scale_2_embed = torch.zeros(1, self.config.d_hidn, h , w).to(device)
         for i in range(h):
             for j in range(w):
                 t_i = int((i/h)*self.config.Grid)
                 t_j = int((j/w)*self.config.Grid)
                 spatial_scale_2_embed[:, :, i, j] = self.pos_embedding[:, t_i, t_j, :]
-        spatial_scale_2_embed = repeat(spatial_scale_2_embed, '() c h w -> b c h w', b=self.config.batch_size)
+        spatial_scale_2_embed = repeat(spatial_scale_2_embed, '() c h w -> b c h w', b=feat_dis_org_embed.size(0))
 
-        feat_dis_org_embed += spatial_org_embed
-        feat_dis_scale_1_embed += spatial_scale_1_embed
-        feat_dis_scale_2_embed += spatial_scale_2_embed
+        tmp_device = feat_dis_org_embed.device
+        feat_dis_org_embed += spatial_org_embed.to(tmp_device)
+        feat_dis_scale_1_embed += spatial_scale_1_embed.to(tmp_device)
+        feat_dis_scale_2_embed += spatial_scale_2_embed.to(tmp_device)
 
         # batch x (C=384) x (H=24) x (W=32) -> batch x (H*W=24*32) x (C=384)
         b, c, h, w = feat_dis_org_embed.size()
@@ -149,7 +155,7 @@ class Encoder(nn.Module):
         inputs_embed = torch.cat((feat_dis_org_embed, feat_dis_scale_1_embed, feat_dis_scale_2_embed), dim=1)
 
         # outputs: batch x (len_seq+1) x n_feat
-        cls_tokens = repeat(self.cls_token, '() n d -> b n d', b=self.config.batch_size)
+        cls_tokens = repeat(self.cls_token, '() n d -> b n d', b=feat_dis_org_embed.size(0))
         x = torch.cat((cls_tokens, inputs_embed), dim=1)
         
         # x += self.pos_embedding     # positional embedding (learnable parameter)

@@ -12,14 +12,15 @@ def train_epoch(config, epoch, model_transformer, model_backbone, criterion, opt
     model_transformer.train()
     model_backbone.train()
 
-    # input mask (batch_size x len_sqe+1)
-    mask_inputs = torch.ones(config.batch_size, config.n_enc_seq+1).to(config.device)
-
     # save data for one epoch
     pred_epoch = []
     labels_epoch = []
     
     for data in tqdm(train_loader):
+        # 在获取d_img_org后定义mask_inputs
+        d_img_org = data['d_img_org'].to(config.device)
+        # input mask (dynamic batch_size x len_sqe+1)
+        mask_inputs = torch.ones(d_img_org.size(0), config.n_enc_seq+1).to(config.device)
         # labels: batch size 
         # d_img_org: 3 x 768 x 1024
         # d_img_scale_1: 3 x 288 x 384
@@ -46,7 +47,7 @@ def train_epoch(config, epoch, model_transformer, model_backbone, criterion, opt
         # weight update
         optimizer.zero_grad()
 
-        pred = model_transformer(mask_inputs, feat_dis_org, feat_dis_scale_1, feat_dis_scale_2)
+        pred = model_transformer(feat_dis_org, feat_dis_scale_1, feat_dis_scale_2)
         loss = criterion(torch.squeeze(pred), labels)
         loss_val = loss.item()
         losses.append(loss_val)
@@ -74,8 +75,9 @@ def train_epoch(config, epoch, model_transformer, model_backbone, criterion, opt
         weights_file = os.path.join(config.snap_path, weights_file_name)
         torch.save({
             'epoch': epoch,
-            'model_backbone_state_dict': model_backbone.state_dict(),
-            'model_transformer_state_dict': model_transformer.state_dict(),
+            # 兼容单卡/多卡
+            'model_backbone_state_dict': model_backbone.module.state_dict() if isinstance(model_backbone, torch.nn.DataParallel) else model_backbone.state_dict(),
+            'model_transformer_state_dict': model_transformer.module.state_dict() if isinstance(model_transformer, torch.nn.DataParallel) else model_transformer.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
             'loss': loss
@@ -120,7 +122,7 @@ def eval_epoch(config, epoch, model_transformer, model_backbone, criterion, test
             feat_dis_scale_1 = model_backbone(d_img_scale_1)
             feat_dis_scale_2 = model_backbone(d_img_scale_2)
 
-            pred = model_transformer(mask_inputs, feat_dis_org, feat_dis_scale_1, feat_dis_scale_2)            
+            pred = model_transformer(feat_dis_org, feat_dis_scale_1, feat_dis_scale_2)       
 
             # compute loss
             loss = criterion(torch.squeeze(pred), labels)
