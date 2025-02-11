@@ -12,7 +12,7 @@ class Config(object):
         # 硬件配置
         'gpu_get_class_path': 'utils.gpu_util.GPUGet',  # GPU检测类路径
         'gpu_id': None,                                 # 指定使用的GPU编号（None为自动选择）
-        'num_workers': 4,                               # 数据加载线程数
+        'num_workers': 12,                               # 数据加载线程数
         
         # 数据配置
         'db_name': 'KonIQ-10k',                         # 使用的数据库名称

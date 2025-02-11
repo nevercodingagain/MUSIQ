@@ -16,7 +16,7 @@ def train_epoch(config, epoch, model_transformer, model_backbone, criterion, opt
     pred_epoch = []
     labels_epoch = []
     
-    for data in tqdm(train_loader):
+    for data in tqdm(train_loader, desc=f'Epoch {epoch+1}', dynamic_ncols=True, position=0):
         # 在获取d_img_org后定义mask_inputs
         d_img_org = data['d_img_org'].to(config.device)
         # input mask (dynamic batch_size x len_sqe+1)
@@ -107,7 +107,7 @@ def eval_epoch(config, epoch, model_transformer, model_backbone, criterion, test
         pred_epoch = []
         labels_epoch = []
 
-        for data in tqdm(test_loader):
+        for data in tqdm(test_loader, desc=f'Epoch {epoch+1}', dynamic_ncols=True, position=0):
             # labels: batch size 
             # d_img_org: batch x 3 x 768 x 1024
             # d_img_scale_1: batch x 3 x 288 x 384
