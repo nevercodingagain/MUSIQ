@@ -14,10 +14,12 @@ from utils.gpu_util import GPUGet
 from utils.logger import TrainingLogger
 from collections import OrderedDict
 
+
 # config file
 config = Config({
     'exp_name': 'koniq2',
     'checkpoint_name': 'epoch90.pth',
+    'max_gpu_number': 2,
     })
 
 # data selection
@@ -95,7 +97,6 @@ if config.checkpoint is not None:
     loss = checkpoint['loss']
     
     print(f"当前设备: {config.device}")
-    print(f"模型参数设备: {next(model_backbone.parameters()).device}")
     
     # 清楚log中超出的部分
     if config.save_log:

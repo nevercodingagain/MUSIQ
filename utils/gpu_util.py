@@ -3,8 +3,9 @@ import time
 
 
 class GPUGet:
-    def __init__(self, min_gpu_number=1, time_interval=5, required_mem=1000, max_power=200):
+    def __init__(self, min_gpu_number=1, max_gpu_number=4, time_interval=5, required_mem=1000, max_power=200):
         self.min_gpu_number = min_gpu_number
+        self.max_gpu_number = max_gpu_number
         self.time_interval = time_interval
         self.required_mem = required_mem  # 单位 MiB
         self.max_power = max_power        # 单位 W
@@ -39,7 +40,7 @@ class GPUGet:
                 if info["memory_available"] >= self.required_mem and info["power"] <= self.max_power
             ]
             if len(current_available) >= self.min_gpu_number:
-                available_gpus = current_available
+                available_gpus = current_available[:self.max_gpu_number]
                 break
             else:
                 print(f"等待可用 GPU... 当前可用: {current_available}")

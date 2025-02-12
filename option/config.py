@@ -10,9 +10,10 @@ class Config(object):
         # 基础参数（可以通过custom_params修改）
         base_params = {
         # 硬件配置
-        'gpu_get_class_path': 'utils.gpu_util.GPUGet',  # GPU检测类路径
         'gpu_id': None,                                 # 指定使用的GPU编号（None为自动选择）
-        'num_workers': 12,                               # 数据加载线程数
+        'gpu_get_class_path': 'utils.gpu_util.GPUGet',  # GPU检测类路径
+        'max_gpu_number': 4,                            # 指定最多使用gpu数量
+        'num_workers': 12,                              # 数据加载线程数
         
         # 数据配置
         'db_name': 'KonIQ-10k',                         # 使用的数据库名称
@@ -86,7 +87,7 @@ class Config(object):
         # 自动获取可用gpu_id
         if self.gpu_id is None:  # 自动模式
             try:
-                gpu_get = GPUGet()
+                gpu_get = GPUGet(max_gpu_number=self.max_gpu_number)
                 self.device_ids = gpu_get.get_available_gpus()
                 self.gpu_id = ','.join(map(str, self.device_ids))  # 保持兼容性
             except Exception as e:
@@ -96,7 +97,7 @@ class Config(object):
         else:  # 手动指定模式
             self.device_ids = list(map(int, self.gpu_id.split(',')))
             # 验证GPU是否实际可用
-            gpu_get = GPUGet()
+            gpu_get = GPUGet(max_gpu_number=self.max_gpu_number)
             available_gpus = gpu_get.get_available_gpus()
             if not set(self.device_ids).issubset(available_gpus):
                 raise ValueError(f"指定GPU {self.device_ids} 不可用，当前可用GPU: {available_gpus}")
