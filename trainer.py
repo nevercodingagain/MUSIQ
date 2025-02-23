@@ -19,7 +19,7 @@ def train_epoch(config, epoch, model, criterion, optimizer, scheduler, train_loa
     pred_epoch = []
     labels_epoch = []
     
-    for data in tqdm(train_loader, disable=(rank != 0)):  # 只在主进程显示进度条
+    for data in tqdm(train_loader, desc=f'Epoch {epoch+1}', ncols=150, disable=(rank != 0)):  # 只在主进程显示进度条
         d_img_org = data['d_img_org'].to(config.device, non_blocking=True)
         d_img_scale_1 = data['d_img_scale_1'].to(config.device, non_blocking=True)
         d_img_scale_2 = data['d_img_scale_2'].to(config.device, non_blocking=True)
@@ -92,7 +92,7 @@ def eval_epoch(config, epoch, model, criterion, test_loader):
     labels_epoch = []
 
     with torch.no_grad():
-        for data in tqdm(test_loader, disable=(rank != 0)):
+        for data in tqdm(test_loader, desc=f'Epoch {epoch+1}', ncols=150, disable=(rank != 0)):
             d_img_org = data['d_img_org'].to(config.device, non_blocking=True)
             d_img_scale_1 = data['d_img_scale_1'].to(config.device, non_blocking=True)
             d_img_scale_2 = data['d_img_scale_2'].to(config.device, non_blocking=True)

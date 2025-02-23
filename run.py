@@ -1,5 +1,6 @@
 # run_train.py
 import os
+import subprocess
 from utils.gpu_util import GPUGet
 
 gpu_getter = GPUGet(
@@ -11,10 +12,23 @@ gpu_getter = GPUGet(
 available_gpus = gpu_getter.get_available_gpus()
 if not available_gpus:
         raise RuntimeError("没有找到符合条件的可用GPU")
+else:
+    print(f"▶ 选择GPU设备: {available_gpus}")
 
 gpu_list_str = ','.join(map(str, available_gpus))
 
 # 设置环境变量并启动训练
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list_str
-print(f"CUDA_VISIBLE_DEVICES = %s" % gpu_list_str)
-os.system(f'torchrun --nproc_per_node={len(available_gpus)} --nnodes=1 --master_port=29500 train.py')
+num_gpus = len(available_gpus)
+os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
+num_gpus = 2
+
+# 启动分布式训练
+cmd = [
+    "torchrun",
+    f"--nproc_per_node={num_gpus}",
+    "--nnodes=1",
+    "--master_port=29500",
+    "train.py"           # 你的训练脚本路径
+]
+subprocess.run(cmd)

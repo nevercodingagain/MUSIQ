@@ -26,7 +26,7 @@ print(f"using cuda:%d" % local_rank)
 config = Config({
     # device
     'gpu_id': args.local_rank,                          # specify GPU number to use
-    'num_workers': 8,
+    'num_workers': 12,
 
     # data
     'db_name': 'KonIQ-10k',                                     # database type
@@ -36,7 +36,7 @@ config = Config({
     'scenes': 'all',                                            # using all scenes
     'scale_1': 384,                                             
     'scale_2': 224,
-    'batch_size': 32,
+    'batch_size': 8,
     'patch_size': 32,
 
     # ViT structure
@@ -70,14 +70,19 @@ config = Config({
     'checkpoint': './weights/epoch10.pth',                     # load checkpoint
 })
 
+
 if local_rank != -1:
     # 初始化进程组
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend='nccl', init_method='env://')
     world_size = dist.get_world_size()
+    print(world_size)
     rank = dist.get_rank()
     # 设备设置必须放在初始化进程组之后
     config.device = torch.device(f'cuda:{local_rank}')
+
+# 动态设置batch_size
+config.batch_size = 8 * world_size
 
 # data selection
 if config.db_name == 'KonIQ-10k':
