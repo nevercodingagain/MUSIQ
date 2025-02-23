@@ -1,142 +1,144 @@
 import os
-
 import torch
-from tqdm import tqdm
+import torch.distributed as dist
 import numpy as np
+from tqdm import tqdm
 from scipy.stats import spearmanr, pearsonr
 
 
 """ train model """
-def train_epoch(config, epoch, model_transformer, model_backbone, criterion, optimizer, scheduler, train_loader):
+def train_epoch(config, epoch, model, criterion, optimizer, scheduler, train_loader):
     losses = []
-    model_transformer.train()
-    model_backbone.train()
-
-    # input mask (batch_size x len_sqe+1)
-    mask_inputs = torch.ones(config.batch_size, config.n_enc_seq+1).to(config.device)
-
+    model.train()
+    
+    # 分布式处理
+    world_size = dist.get_world_size()
+    rank = dist.get_rank()
+    
     # save data for one epoch
     pred_epoch = []
     labels_epoch = []
     
-    for data in tqdm(train_loader):
-        # labels: batch size 
-        # d_img_org: 3 x 768 x 1024
-        # d_img_scale_1: 3 x 288 x 384
-        # d_img_scale_2: 3 x 160 x 224
-        d_img_org = data['d_img_org'].to(config.device)
-        d_img_scale_1 = data['d_img_scale_1'].to(config.device)
-        d_img_scale_2 = data['d_img_scale_2'].to(config.device)
+    for data in tqdm(train_loader, disable=(rank != 0)):  # 只在主进程显示进度条
+        d_img_org = data['d_img_org'].to(config.device, non_blocking=True)
+        d_img_scale_1 = data['d_img_scale_1'].to(config.device, non_blocking=True)
+        d_img_scale_2 = data['d_img_scale_2'].to(config.device, non_blocking=True)
+        labels = data['score'].float().squeeze().to(config.device, non_blocking=True)
 
-        labels = data['score']
-        labels = torch.squeeze(labels.type(torch.FloatTensor)).to(config.device)
+        # 动态生成mask_inputs
+        real_batch_size = d_img_org.size(0)
+        mask_inputs = torch.ones(real_batch_size, config.n_enc_seq+1, device=config.device)
 
-        # backbone feature map (dis)
-        # feat_dis_org: 2048 x 24 x 32
-        # feat_dis_scale_1: 2048 x 9 x 12
-        # feat_dis_scale_2: 2048 x 5 x 7
-        feat_dis_org = model_backbone(d_img_org)
-        feat_dis_scale_1 = model_backbone(d_img_scale_1)
-        feat_dis_scale_2 = model_backbone(d_img_scale_2)
-
-        # this value should be extracted from backbone network
-        # enc_inputs_embed: batch x len_seq x n_feat
-        
-
-        # weight update
         optimizer.zero_grad()
 
-        pred = model_transformer(mask_inputs, feat_dis_org, feat_dis_scale_1, feat_dis_scale_2)
-        loss = criterion(torch.squeeze(pred), labels)
-        loss_val = loss.item()
-        losses.append(loss_val)
-
+        # 统一的前向传播
+        pred = model(mask_inputs, d_img_org, d_img_scale_1, d_img_scale_2)
+        loss = criterion(pred.squeeze(), labels)
+        
         loss.backward()
         optimizer.step()
         scheduler.step()
 
-        # save results in one epoch
-        pred_batch_numpy = pred.data.cpu().numpy()
-        labels_batch_numpy = labels.data.cpu().numpy()
-        pred_epoch = np.append(pred_epoch, pred_batch_numpy)
-        labels_epoch = np.append(labels_epoch, labels_batch_numpy)
+        # 保存结果使用Tensor保持设备一致
+        pred_epoch.append(pred.detach().squeeze())
+        labels_epoch.append(labels.detach())
+
+    # 跨进程结果聚合
+    pred_tensor = torch.cat(pred_epoch)
+    labels_tensor = torch.cat(labels_epoch)
     
+    # 分配收集结果的内存
+    gathered_pred = [torch.zeros_like(pred_tensor) for _ in range(world_size)]
+    gathered_labels = [torch.zeros_like(labels_tensor) for _ in range(world_size)]
     
-    # compute correlation coefficient
-    rho_s, _ = spearmanr(np.squeeze(pred_epoch), np.squeeze(labels_epoch))
-    rho_p, _ = pearsonr(np.squeeze(pred_epoch), np.squeeze(labels_epoch))
+    dist.all_gather(gathered_pred, pred_tensor)
+    dist.all_gather(gathered_labels, labels_tensor)
+    
+    # 仅在主进程计算结果
+    if rank == 0:
+        all_pred = torch.cat(gathered_pred).cpu().numpy()
+        all_labels = torch.cat(gathered_labels).cpu().numpy()
+        rho_s, _ = spearmanr(all_pred, all_labels)
+        rho_p, _ = pearsonr(all_pred, all_labels)
+        avg_loss = loss.item()  # 获取最后一步的loss值
+    else:
+        rho_s, rho_p, avg_loss = 0.0, 0.0, 0.0
 
-    print('[train] epoch:%d / loss:%f / SROCC:%4f / PLCC:%4f' % (epoch+1, loss.item(), rho_s, rho_p))
+    # 广播结果到各进程保持同步
+    avg_loss = torch.tensor([avg_loss], device=config.device, dtype=torch.float32)
+    dist.broadcast(avg_loss, src=0)
+    
+    rho_s_tensor = torch.tensor([rho_s], device=config.device, dtype=torch.float32)
+    dist.broadcast(rho_s_tensor, src=0)
+    
+    rho_p_tensor = torch.tensor([rho_p], device=config.device, dtype=torch.float32)
+    dist.broadcast(rho_p_tensor, src=0)
 
-    # save weights
-    if (epoch+1) % config.save_freq == 0:
-        weights_file_name = "epoch%d.pth" % (epoch+1)
-        weights_file = os.path.join(config.snap_path, weights_file_name)
-        torch.save({
-            'epoch': epoch,
-            'model_backbone_state_dict': model_backbone.state_dict(),
-            'model_transformer_state_dict': model_transformer.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict(),
-            'loss': loss
-        }, weights_file)
-        print('save weights of epoch %d' % (epoch+1))
+    # 主进程打印结果
+    if rank == 0:
+        print(f'[train] epoch:{epoch+1} / loss:{avg_loss.item():.4f} '
+              f'/ SROCC:{rho_s_tensor.item():.4f} / PLCC:{rho_p_tensor.item():.4f}')
 
-    return np.mean(losses), rho_s, rho_p
-
+    return avg_loss.item(), rho_s_tensor.item(), rho_p_tensor.item()
 
 """ validation """
-def eval_epoch(config, epoch, model_transformer, model_backbone, criterion, test_loader):
+def eval_epoch(config, epoch, model, criterion, test_loader):
+    model.eval()  # 统一设置评估模式
+
+    world_size = dist.get_world_size()
+    rank = dist.get_rank()
+
+    pred_epoch = []
+    labels_epoch = []
+
     with torch.no_grad():
-        losses = []
-        model_transformer.eval()
-        model_backbone.eval()
+        for data in tqdm(test_loader, disable=(rank != 0)):
+            d_img_org = data['d_img_org'].to(config.device, non_blocking=True)
+            d_img_scale_1 = data['d_img_scale_1'].to(config.device, non_blocking=True)
+            d_img_scale_2 = data['d_img_scale_2'].to(config.device, non_blocking=True)
+            labels = data['score'].float().squeeze().to(config.device, non_blocking=True)
 
-        # value is not changed
-        mask_inputs = torch.ones(config.batch_size, config.n_enc_seq+1).to(config.device)
+            real_batch_size = d_img_org.size(0)
+            mask_inputs = torch.ones(real_batch_size, config.n_enc_seq+1, device=config.device)
 
-        # save data for one epoch
-        pred_epoch = []
-        labels_epoch = []
+            pred = model(mask_inputs, d_img_org, d_img_scale_1, d_img_scale_2)
+            loss = criterion(pred.squeeze(), labels)
 
-        for data in tqdm(test_loader):
-            # labels: batch size 
-            # d_img_org: batch x 3 x 768 x 1024
-            # d_img_scale_1: batch x 3 x 288 x 384
-            # d_img_scale_2: batch x 3 x 160 x 224
+            pred_epoch.append(pred.detach().squeeze())
+            labels_epoch.append(labels.detach())
 
-            d_img_org = data['d_img_org'].to(config.device)
-            d_img_scale_1 = data['d_img_scale_1'].to(config.device)
-            d_img_scale_2 = data['d_img_scale_2'].to(config.device)
+    # 结果聚合
+    pred_tensor = torch.cat(pred_epoch)
+    labels_tensor = torch.cat(labels_epoch)
+    
+    gathered_pred = [torch.zeros_like(pred_tensor) for _ in range(world_size)]
+    gathered_labels = [torch.zeros_like(labels_tensor) for _ in range(world_size)]
+    
+    dist.all_gather(gathered_pred, pred_tensor)
+    dist.all_gather(gathered_labels, labels_tensor)
 
-            labels = data['score']
-            labels = torch.squeeze(labels.type(torch.FloatTensor)).to(config.device)
+    # 主进程计算指标
+    if rank == 0:
+        all_pred = torch.cat(gathered_pred).cpu().numpy()
+        all_labels = torch.cat(gathered_labels).cpu().numpy()
+        rho_s, _ = spearmanr(all_pred, all_labels)
+        rho_p, _ = pearsonr(all_pred, all_labels)
+        avg_loss = loss.item()
+    else:
+        rho_s, rho_p, avg_loss = 0, 0, 0
 
-            # backbone featuremap
-            # feat_dis_org: batch x 2048 x 24 x 32
-            # feat_dis_scale_1: batch x 2048 x 9 x 12
-            # feat_dis_scale_2: batch x 2048 x 5 x 12
-            feat_dis_org = model_backbone(d_img_org)
-            feat_dis_scale_1 = model_backbone(d_img_scale_1)
-            feat_dis_scale_2 = model_backbone(d_img_scale_2)
+    # 维持各进程参数同步
+    avg_loss = torch.tensor([avg_loss], device=config.device)
+    dist.broadcast(avg_loss, src=0)
+    
+    rho_s_tensor = torch.tensor([rho_s], device=config.device)
+    dist.broadcast(rho_s_tensor, src=0)
+    
+    rho_p_tensor = torch.tensor([rho_p], device=config.device)
+    dist.broadcast(rho_p_tensor, src=0)
 
-            pred = model_transformer(mask_inputs, feat_dis_org, feat_dis_scale_1, feat_dis_scale_2)            
+    if rank == 0:
+        print(f'[test] epoch:{epoch+1} / loss:{avg_loss.item():.4f} '
+              f'/ SROCC:{rho_s_tensor.item():.4f} / PLCC:{rho_p_tensor.item():.4f}')
 
-            # compute loss
-            loss = criterion(torch.squeeze(pred), labels)
-            loss_val = loss.item()
-            losses.append(loss_val)
-
-            # save results in one epoch
-            pred_batch_numpy = pred.data.cpu().numpy()
-            labels_batch_numpy = labels.data.cpu().numpy()
-            pred_epoch = np.append(pred_epoch, pred_batch_numpy)
-            labels_epoch = np.append(labels_epoch, labels_batch_numpy)
-        
-        # compute correlation coefficient
-        rho_s, _ = spearmanr(np.squeeze(pred_epoch), np.squeeze(labels_epoch))
-        rho_p, _ = pearsonr(np.squeeze(pred_epoch), np.squeeze(labels_epoch))
-
-        print('test epoch:%d / loss:%f /SROCC:%4f / PLCC:%4f' % (epoch+1, loss.item(), rho_s, rho_p))
-
-        return np.mean(losses), rho_s, rho_p
+    return avg_loss.item(), rho_s_tensor.item(), rho_p_tensor.item()
