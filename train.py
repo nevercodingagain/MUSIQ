@@ -79,21 +79,12 @@ if local_rank != -1:
     # 设备设置必须放在初始化进程组之后
     config.device = torch.device(f'cuda:{local_rank}')
 
-# # device setting
-# config.device = torch.device('cuda:%s' % config.gpu_id if torch.cuda.is_available() else 'cpu')
-# if torch.cuda.is_available():
-#     print('Using GPU %s' % config.gpu_id)
-# else:
-#     print('Using CPU')
-
 # data selection
 if config.db_name == 'KonIQ-10k':
     from data.koniq import IQADataset
 
 # dataset separation (8:2)
 train_scene_list, test_scene_list = RandShuffle(config)
-# print('number of train scenes: %d' % len(train_scene_list))
-# print('number of test scenes: %d' % len(test_scene_list))
 
 # data load
 train_dataset = IQADataset(
@@ -116,8 +107,6 @@ test_dataset = IQADataset(
     scene_list=test_scene_list,
     train_size=config.train_size
 )
-# train_loader = DataLoader(dataset=train_dataset, batch_size=config.batch_size, num_workers=config.num_workers, drop_last=True, shuffle=True)
-# test_loader = DataLoader(dataset=test_dataset, batch_size=config.batch_size, num_workers=config.num_workers, drop_last=True, shuffle=True)
 
 # 数据集部分修改
 train_sampler = DistributedSampler(train_dataset, shuffle=True)
@@ -170,17 +159,6 @@ params = list(ddp_model.parameters())
 optimizer = torch.optim.SGD(params, lr=config.learning_rate * world_size, weight_decay=config.weight_decay, momentum=config.momentum)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.T_max, eta_min=config.eta_min)
 
-# # create model
-# model_backbone = resnet50_backbone().to(config.device)
-# model_transformer = IQARegression(config).to(config.device)
-
-
-# # loss function & optimization
-# criterion = torch.nn.L1Loss()
-# params = list(model_backbone.parameters()) + list(model_transformer.parameters())
-# optimizer = torch.optim.SGD(params, lr=config.learning_rate, weight_decay=config.weight_decay, momentum=config.momentum)
-# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.T_max, eta_min=config.eta_min)
-
 # 加载检查点
 if config.checkpoint is not None and os.path.isfile(config.checkpoint):
     map_location = {'cuda:%d' % 0: 'cuda:%d' % local_rank}  # 多GPU加载映射
@@ -199,26 +177,9 @@ if config.checkpoint is not None and os.path.isfile(config.checkpoint):
 else:
     start_epoch = 0
 
-# load weights & optimizer
-# if config.checkpoint is not None:
-#     checkpoint = torch.load(config.checkpoint)
-#     model_backbone.load_state_dict(checkpoint['model_backbone_state_dict'])
-#     model_transformer.load_state_dict(checkpoint['model_transformer_state_dict'])
-#     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-#     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-#     start_epoch = checkpoint['epoch']
-#     loss = checkpoint['loss']
-# else:
-#     start_epoch = 0
-
 # 主进程创建保存目录
 if rank == 0 and not os.path.exists(config.snap_path):
     os.makedirs(config.snap_path, exist_ok=True)
-
-# make directory for saving weights
-# if not os.path.exists(config.snap_path):
-#     os.mkdir(config.snap_path)
-
 
 # train & validation
 for epoch in range(start_epoch, config.n_epoch):
