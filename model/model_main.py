@@ -98,7 +98,7 @@ class Encoder(nn.Module):
         # learnable scale embedding
         scale_org_embed = repeat(self.scale_org_embedding, '() c () () -> b c h w', b=feat_dis_org_embed.size(0), h=24, w=32)
         scale_1_embed = repeat(self.scale_1_embedding, '() c () () -> b c h w', b=feat_dis_org_embed.size(0), h=9, w=12)
-        scale_2_embed = repeat(self.scale_1_embedding, '() c () () -> b c h w', b=feat_dis_org_embed.size(0), h=5, w=7)
+        scale_2_embed = repeat(self.scale_2_embedding, '() c () () -> b c h w', b=feat_dis_org_embed.size(0), h=5, w=7)
 
         #print(103,feat_dis_org_embed.shape,scale_org_embed.shape) #torch.Size([2, 384, 24, 32]) torch.Size([8, 384, 24, 32])
         feat_dis_org_embed += scale_org_embed
