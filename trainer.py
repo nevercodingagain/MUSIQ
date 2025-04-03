@@ -2,6 +2,7 @@ import os
 import torch
 import torch.distributed as dist
 import numpy as np
+import logging
 from tqdm import tqdm
 from scipy.stats import spearmanr, pearsonr
 
@@ -76,8 +77,9 @@ def train_epoch(config, epoch, model, criterion, optimizer, scheduler, train_loa
 
     # 主进程打印结果
     if rank == 0:
-        print(f'[train] epoch:{epoch+1} / loss:{avg_loss.item():.4f} '
-              f'/ SROCC:{rho_s_tensor.item():.4f} / PLCC:{rho_p_tensor.item():.4f}')
+        logging.info('train epoch:%d / loss:%.5f / SRCC:%.4f / PLCC:%.4f', 
+                    epoch+1, avg_loss.item(), rho_s_tensor.item(), rho_p_tensor.item())
+
 
     return avg_loss.item(), rho_s_tensor.item(), rho_p_tensor.item()
 
@@ -138,7 +140,7 @@ def eval_epoch(config, epoch, model, criterion, test_loader):
     dist.broadcast(rho_p_tensor, src=0)
 
     if rank == 0:
-        print(f'[test] epoch:{epoch+1} / loss:{avg_loss.item():.4f} '
-              f'/ SROCC:{rho_s_tensor.item():.4f} / PLCC:{rho_p_tensor.item():.4f}')
+        logging.info('Epoch:%d ===== loss:%.5f ===== SRCC:%.4f ===== PLCC:%.4f', 
+                    epoch+1, avg_loss.item(), rho_s_tensor.item(), rho_p_tensor.item())
 
     return avg_loss.item(), rho_s_tensor.item(), rho_p_tensor.item()

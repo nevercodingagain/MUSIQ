@@ -2,6 +2,7 @@ import os
 import argparse
 import torch
 import torch.distributed as dist
+import logging
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torchvision import transforms
@@ -66,9 +67,34 @@ config = Config({
 
 
     # load & save checkpoint
-    'snap_path': './weights',               # directory for saving checkpoint
+    'snap_path': './output/models',               # directory for saving checkpoint
     'checkpoint': './weights/epoch10.pth',                     # load checkpoint
+    
+    # log system
+    'log_path': './output/log',
+    'tensorboard_path': './output/tensorboard',
+
+    # exp name
+    'model_name': 'koniq10k-exp1',     # 自定义模型名称
+    'type_name': 'Koniq10k',           # 实验类型名称
+    'log_file': 'training.log'         # 日志文件名
 })
+
+
+def setup_logging(config):
+    """日志初始化函数"""
+    log_file = os.path.join(config.log_path, config.log_file)
+    logging.basicConfig(
+        level=logging.INFO,
+        filename=log_file,
+        filemode='w',
+        format='[%(asctime)s %(levelname)-8s] %(message)s',
+        datefmt='%Y%m%d %H:%M:%S'
+    )
+    # 添加控制台输出
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter('[%(asctime)s %(levelname)-8s] %(message)s', datefmt='%Y%m%d %H:%M:%S'))
+    logging.getLogger().addHandler(console)
 
 
 if local_rank != -1:
@@ -76,10 +102,24 @@ if local_rank != -1:
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend='nccl', init_method='env://')
     world_size = dist.get_world_size()
-    print(world_size)
     rank = dist.get_rank()
     # 设备设置必须放在初始化进程组之后
     config.device = torch.device(f'cuda:{local_rank}')
+
+# 动态生成相关路径（仅主进程操作）
+if rank == 0: 
+    config.log_path = os.path.join(config.log_path, config.type_name, config.model_name)
+    config.snap_path = os.path.join(config.snap_path, config.type_name, config.model_name)
+    config.tensorboard_path = os.path.join(config.tensorboard_path, config.type_name, config.model_name)
+    
+    # 确保路径存在
+    os.makedirs(config.log_path, exist_ok=True)
+    os.makedirs(config.snap_path, exist_ok=True)
+    os.makedirs(config.tensorboard_path, exist_ok=True)
+
+if rank == 0:  # 仅主进程初始化
+    setup_logging(config)
+    logging.info(config)
 
 # 动态设置batch_size
 config.batch_size = 8 * world_size
@@ -190,16 +230,25 @@ if rank == 0 and not os.path.exists(config.snap_path):
 for epoch in range(start_epoch, config.n_epoch):
     # 每个epoch前设置sampler的epoch（保证shuffle正确性）
     train_loader.sampler.set_epoch(epoch)
+    if rank == 0:
+        logging.info('Running training epoch %d', epoch+1)
     loss, rho_s, rho_p = train_epoch(config, epoch, ddp_model, criterion, optimizer, scheduler, train_loader)
 
     if (epoch+1) % config.val_freq == 0:
+        if rank == 0:
+            logging.info('Starting eval...')
+            logging.info('Running testing in epoch %d', epoch+1)
+            
         val_loss, val_rho_s, val_rho_p = eval_epoch(config, epoch, ddp_model, criterion, test_loader)
+        
+        if rank == 0:
+            logging.info('Eval done...')
     
     # 只由主进程保存模型
     if (epoch+1) % config.save_freq == 0 and rank == 0:
         save_path = os.path.join(
             config.snap_path, 
-            f'epoch{epoch+1}_SROCC_{rho_s:.4f}_PLCC_{rho_p:.4f}.pth'
+            f'epoch{epoch+1}_SROCC_{val_rho_s:.4f}_PLCC_{val_rho_p:.4f}.pth'
         )
         torch.save({
             'epoch': epoch,
@@ -210,4 +259,7 @@ for epoch in range(start_epoch, config.n_epoch):
             'SROCC': rho_s,
             'PLCC': rho_p
         }, save_path)
-        print(f'Saved checkpoint to {save_path}')
+        logging.info(f'save model to:{save_path}') 
+    
+    if rank == 0:
+        logging.info('======================================================================================')

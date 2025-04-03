@@ -20,7 +20,7 @@ gpu_list_str = ','.join(map(str, available_gpus))
 # 设置环境变量并启动训练
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list_str
 num_gpus = len(available_gpus)
-os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 num_gpus = 2
 
 # 启动分布式训练

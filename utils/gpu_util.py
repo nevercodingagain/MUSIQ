@@ -3,7 +3,7 @@ import time
 
 
 class GPUGet:
-    def __init__(self, min_gpu_number=1, max_gpu_number=4, time_interval=5, required_mem=1000, max_power=200):
+    def __init__(self, min_gpu_number=1, max_gpu_number=4, time_interval=5, required_mem=10000, max_power=500):
         self.min_gpu_number = min_gpu_number
         self.max_gpu_number = max_gpu_number
         self.time_interval = time_interval
